@@ -56,7 +56,7 @@ public static class ICacheHelper
         }
         catch (Exception ex)
         {
-            _logger?.LogError("### Error initialising RedisCache, Fallback to IMemoryCache", ex);
+            _logger?.LogError(ex, "### Error initialising RedisCache, Fallback to IMemoryCache");
 
             services.ConfigureICacheServiceInMemory();
             return services;
@@ -64,6 +64,10 @@ public static class ICacheHelper
 
         services.AddSingleton<IConnectionMultiplexer>(multiplexer);
         services.AddTransient<ICacheService, RedisService>();
+
+        //Configure InMemoryCache for runtime fallback
+        services.AddMemoryCache();
+        services.AddTransient<InMemoryCacheService>();
 
         _logger?.LogInformation("### Successfully initialised RedisCache!");
 

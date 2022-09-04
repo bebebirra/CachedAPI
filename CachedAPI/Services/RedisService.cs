@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
-using StackExchange.Redis;
+﻿using StackExchange.Redis;
 using System.Text.Json;
 
 namespace CachedAPI.Services;
@@ -9,12 +8,16 @@ public class RedisService : ICacheService
     private readonly IDatabase db;
 
     private readonly ILogger<RedisService> logger;
+    private readonly InMemoryCacheService inMemoryCacheService;
+    private static bool EnableFallback = false;
 
     public RedisService(
         IConnectionMultiplexer connectionMultiplexer,
+        InMemoryCacheService inMemoryCacheService,
         ILogger<RedisService> logger)
     {
         db = connectionMultiplexer.GetDatabase();
+        this.inMemoryCacheService = inMemoryCacheService;
         this.logger = logger;
     }
 
@@ -22,7 +25,24 @@ public class RedisService : ICacheService
         string Key, 
         CancellationToken cancellationToken = default)
     {
-        var redisValue = await db.StringGetAsync(Key);
+        if (EnableFallback) 
+        {
+            return await inMemoryCacheService
+                .GetCacheValueAsync<T>(Key, cancellationToken);
+        }
+
+        RedisValue redisValue = new();
+
+        try
+        {
+            redisValue = await db.StringGetAsync(Key);
+        }
+        catch(Exception e)
+        {
+            logger.LogError(e, "### Redis Cache unreachable !!!");
+            EnableFallback = true;
+            return default;
+        }
 
         if (redisValue.IsNullOrEmpty)
         {
@@ -49,6 +69,17 @@ public class RedisService : ICacheService
         string Key, 
         T Value, CancellationToken cancellationToken = default) where T : class
     {
+        if (EnableFallback)
+        {
+            await inMemoryCacheService
+                .SetCacheValueAsync<T>(
+                    Key, 
+                    Value, 
+                    cancellationToken);
+            return;
+        }
+
+
         if (string.IsNullOrEmpty(Key))
         {
             throw new ArgumentNullException(nameof(Key));
@@ -60,12 +91,23 @@ public class RedisService : ICacheService
         }
 
         var json = JsonSerializer.Serialize(Value);
-        
-        await db.StringSetAsync(
-            Key, 
-            json,
-            TimeSpan.FromMinutes(ICacheService.ExpirationMinutes));
+        try
+        {
+            await db.StringSetAsync(
+                Key,
+                json,
+                TimeSpan.FromMinutes(ICacheService.ExpirationMinutes));
 
-        logger.LogInformation(">>> Cache set for Key:{Key}", Key);
+            logger.LogInformation(">>> Cache set for Key:{Key}", Key);
+        }
+        catch(Exception e)
+        {
+            logger.LogError(e, "### Redis Cache unreachable !!!");
+            EnableFallback = true;
+            await inMemoryCacheService.SetCacheValueAsync(
+                Key, 
+                Value, 
+                cancellationToken);
+        }
     }
 }
