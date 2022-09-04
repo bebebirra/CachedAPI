@@ -9,7 +9,7 @@ public class RedisService : ICacheService
 
     private readonly ILogger<RedisService> logger;
     private readonly InMemoryCacheService inMemoryCacheService;
-    private static bool EnableFallback = false;
+    private static bool IsFallbackEnabled = false;
 
     public RedisService(
         IConnectionMultiplexer connectionMultiplexer,
@@ -25,7 +25,7 @@ public class RedisService : ICacheService
         string Key, 
         CancellationToken cancellationToken = default)
     {
-        if (EnableFallback) 
+        if (IsFallbackEnabled) 
         {
             return await inMemoryCacheService
                 .GetCacheValueAsync<T>(Key, cancellationToken);
@@ -40,7 +40,7 @@ public class RedisService : ICacheService
         catch(Exception e)
         {
             logger.LogError(e, "### Redis Cache unreachable !!!");
-            EnableFallback = true;
+            IsFallbackEnabled = true;
             return default;
         }
 
@@ -69,7 +69,7 @@ public class RedisService : ICacheService
         string Key, 
         T Value, CancellationToken cancellationToken = default) where T : class
     {
-        if (EnableFallback)
+        if (IsFallbackEnabled)
         {
             await inMemoryCacheService
                 .SetCacheValueAsync<T>(
@@ -103,7 +103,7 @@ public class RedisService : ICacheService
         catch(Exception e)
         {
             logger.LogError(e, "### Redis Cache unreachable !!!");
-            EnableFallback = true;
+            IsFallbackEnabled = true;
             await inMemoryCacheService.SetCacheValueAsync(
                 Key, 
                 Value, 
