@@ -47,20 +47,16 @@ public static class ICacheHelper
     {
         IConnectionMultiplexer multiplexer;
         var _logger = services.BuildServiceProvider().GetService<ILogger<Program>>();
-        
-        try
-        {
-            var connectionString = configuration
-                .GetValue<string>("RedisConnectionString");
-            multiplexer = ConnectionMultiplexer.Connect(connectionString);
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "### Error initialising RedisCache, Fallback to IMemoryCache");
 
-            services.ConfigureICacheServiceInMemory();
-            return services;
-        }
+        var connectionString = configuration
+            .GetValue<string>("RedisConnectionString");
+        ConfigurationOptions redisOptions = new ConfigurationOptions
+        {
+            EndPoints = { connectionString },
+            AbortOnConnectFail = false
+        };
+
+        multiplexer = ConnectionMultiplexer.Connect(redisOptions);
 
         services.AddSingleton<IConnectionMultiplexer>(multiplexer);
         services.AddTransient<ICacheService, RedisService>();
@@ -73,5 +69,4 @@ public static class ICacheHelper
 
         return services;
     }
-
 }

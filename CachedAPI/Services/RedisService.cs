@@ -3,29 +3,46 @@ using System.Text.Json;
 
 namespace CachedAPI.Services;
 
-public class RedisService : ICacheService
+public class RedisService : ICacheService, IDisposable
 {
     private readonly IDatabase db;
+    private readonly IConnectionMultiplexer connectionMultiplexer;
 
     private readonly ILogger<RedisService> logger;
     private readonly InMemoryCacheService inMemoryCacheService;
-    private static bool IsFallbackEnabled = false;
+    private bool IsFallbackEnabled = false;
 
     public RedisService(
         IConnectionMultiplexer connectionMultiplexer,
         InMemoryCacheService inMemoryCacheService,
         ILogger<RedisService> logger)
     {
+        this.connectionMultiplexer = connectionMultiplexer;
         db = connectionMultiplexer.GetDatabase();
         this.inMemoryCacheService = inMemoryCacheService;
         this.logger = logger;
+
+        IsFallbackEnabled = !this.connectionMultiplexer.IsConnected;
+
+        this.connectionMultiplexer.ConnectionFailed += FailedConnection;
+        this.connectionMultiplexer.ConnectionRestored += RestoredConnection;
+    }
+
+    private void RestoredConnection(object? sender, ConnectionFailedEventArgs e)
+    {
+        IsFallbackEnabled = false;
+    }
+
+    private void FailedConnection(object? sender, ConnectionFailedEventArgs e)
+    {
+        IsFallbackEnabled = true;
     }
 
     public async Task<T> GetCacheValueAsync<T>(
-        string Key, 
+        string Key,
         CancellationToken cancellationToken = default)
     {
-        if (IsFallbackEnabled) 
+        if (IsFallbackEnabled)
         {
             return await inMemoryCacheService
                 .GetCacheValueAsync<T>(Key, cancellationToken);
@@ -37,7 +54,7 @@ public class RedisService : ICacheService
         {
             redisValue = await db.StringGetAsync(Key);
         }
-        catch(Exception e)
+        catch (Exception e)
         {
             logger.LogError(e, "### Redis Cache unreachable !!!");
             IsFallbackEnabled = true;
@@ -66,15 +83,15 @@ public class RedisService : ICacheService
     }
 
     public async Task SetCacheValueAsync<T>(
-        string Key, 
+        string Key,
         T Value, CancellationToken cancellationToken = default) where T : class
     {
         if (IsFallbackEnabled)
         {
             await inMemoryCacheService
                 .SetCacheValueAsync<T>(
-                    Key, 
-                    Value, 
+                    Key,
+                    Value,
                     cancellationToken);
             return;
         }
@@ -100,14 +117,20 @@ public class RedisService : ICacheService
 
             logger.LogInformation(">>> Cache set for Key:{Key}", Key);
         }
-        catch(Exception e)
+        catch (Exception e)
         {
             logger.LogError(e, "### Redis Cache unreachable !!!");
             IsFallbackEnabled = true;
             await inMemoryCacheService.SetCacheValueAsync(
-                Key, 
-                Value, 
+                Key,
+                Value,
                 cancellationToken);
         }
+    }
+
+    public void Dispose()
+    {
+        connectionMultiplexer.ConnectionFailed -= FailedConnection;
+        connectionMultiplexer.ConnectionRestored -= RestoredConnection;
     }
 }
